@@ -1,0 +1,5 @@
+{
+  "name": "AetherData: AI Data Translation Layer",
+  "description": "An enterprise-grade frontend for transforming unstructured, messy data into structured, model-ready JSON using Gemini AI.",
+  "requestFramePermissions": []
+}
