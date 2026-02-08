@@ -1,323 +1,305 @@
-
-import React, { useState, useCallback, useRef } from 'react';
-import { DataObject, DataSourceType, TransformationSchema, VectorEntry } from './types';
-import { SCHEMAS } from './constants';
-import { geminiService } from './services/geminiService';
-import { 
-  FileUp, 
-  Database, 
-  Code2, 
-  Layers, 
-  ChevronRight, 
-  CheckCircle2, 
-  AlertCircle,
+import React, { useMemo, useState } from 'react';
+import {
+  LayoutDashboard,
+  Users,
+  Truck,
+  UserRound,
+  Package,
+  Clock3,
+  CircleCheck,
+  AlertTriangle,
+  MapPinned,
+  Phone,
+  Route,
   Activity,
-  History,
-  Trash2,
-  Maximize2
+  TrendingUp,
 } from 'lucide-react';
 
+type PageKey = 'dashboard' | 'clients' | 'providers' | 'riders';
+
+type DeliveryStatus = 'Delivered' | 'In Transit' | 'Pending' | 'Delayed';
+
+interface DeliveryOrder {
+  id: string;
+  client: string;
+  provider: string;
+  rider: string;
+  destination: string;
+  eta: string;
+  status: DeliveryStatus;
+}
+
+interface Client {
+  id: string;
+  name: string;
+  location: string;
+  totalOrders: number;
+  activeOrders: number;
+}
+
+interface ServiceProvider {
+  id: string;
+  company: string;
+  serviceType: string;
+  rating: number;
+  completedJobs: number;
+}
+
+interface Rider {
+  id: string;
+  name: string;
+  zone: string;
+  phone: string;
+  deliveriesToday: number;
+  status: 'Available' | 'On Delivery' | 'Offline';
+}
+
+const orders: DeliveryOrder[] = [
+  { id: 'ORD-4021', client: 'Luna Mart', provider: 'SwiftShip Ltd', rider: 'Ibrahim Musa', destination: 'Lekki Phase 1', eta: '18 mins', status: 'In Transit' },
+  { id: 'ORD-4022', client: 'Nora Pharmacy', provider: 'Prime Route', rider: 'Adaobi Eze', destination: 'Yaba', eta: 'Delivered', status: 'Delivered' },
+  { id: 'ORD-4023', client: 'Green Basket', provider: 'SwiftShip Ltd', rider: 'Kola Ibrahim', destination: 'Ikeja GRA', eta: '35 mins', status: 'Pending' },
+  { id: 'ORD-4024', client: 'Taste Town', provider: 'CityDrop', rider: 'Chinedu Paul', destination: 'Surulere', eta: '42 mins', status: 'Delayed' },
+  { id: 'ORD-4025', client: 'Nova Boutique', provider: 'Prime Route', rider: 'Fatima Ali', destination: 'Victoria Island', eta: '26 mins', status: 'In Transit' },
+];
+
+const clients: Client[] = [
+  { id: 'C-100', name: 'Luna Mart', location: 'Lekki', totalOrders: 245, activeOrders: 11 },
+  { id: 'C-101', name: 'Nora Pharmacy', location: 'Yaba', totalOrders: 183, activeOrders: 5 },
+  { id: 'C-102', name: 'Green Basket', location: 'Ikeja', totalOrders: 208, activeOrders: 7 },
+  { id: 'C-103', name: 'Taste Town', location: 'Surulere', totalOrders: 120, activeOrders: 9 },
+];
+
+const providers: ServiceProvider[] = [
+  { id: 'SP-20', company: 'SwiftShip Ltd', serviceType: 'Same-day Delivery', rating: 4.7, completedJobs: 5600 },
+  { id: 'SP-21', company: 'Prime Route', serviceType: 'Express Delivery', rating: 4.5, completedJobs: 4320 },
+  { id: 'SP-22', company: 'CityDrop', serviceType: 'Standard Delivery', rating: 4.2, completedJobs: 3910 },
+];
+
+const riders: Rider[] = [
+  { id: 'R-01', name: 'Ibrahim Musa', zone: 'Lekki', phone: '+234-801-333-9911', deliveriesToday: 14, status: 'On Delivery' },
+  { id: 'R-02', name: 'Adaobi Eze', zone: 'Yaba', phone: '+234-809-881-3344', deliveriesToday: 9, status: 'Available' },
+  { id: 'R-03', name: 'Kola Ibrahim', zone: 'Ikeja', phone: '+234-817-444-2290', deliveriesToday: 7, status: 'Available' },
+  { id: 'R-04', name: 'Fatima Ali', zone: 'Victoria Island', phone: '+234-806-122-8712', deliveriesToday: 11, status: 'On Delivery' },
+  { id: 'R-05', name: 'Chinedu Paul', zone: 'Surulere', phone: '+234-818-320-0063', deliveriesToday: 3, status: 'Offline' },
+];
+
+const statusClasses: Record<DeliveryStatus, string> = {
+  Delivered: 'bg-emerald-100 text-emerald-700',
+  'In Transit': 'bg-blue-100 text-blue-700',
+  Pending: 'bg-amber-100 text-amber-700',
+  Delayed: 'bg-rose-100 text-rose-700',
+};
+
 const App: React.FC = () => {
-  const [activeSchema, setActiveSchema] = useState<TransformationSchema>(SCHEMAS[0]);
-  const [dataObjects, setDataObjects] = useState<DataObject[]>([]);
-  const [vectorDb, setVectorDb] = useState<VectorEntry[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [activePage, setActivePage] = useState<PageKey>('dashboard');
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  const stats = useMemo(() => {
+    const delivered = orders.filter((order) => order.status === 'Delivered').length;
+    const inTransit = orders.filter((order) => order.status === 'In Transit').length;
+    const delayed = orders.filter((order) => order.status === 'Delayed').length;
 
-    // Fix: Explicitly cast to File[] and type the callback parameter to avoid 'unknown' type errors
-    (Array.from(files) as File[]).forEach((file: File) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const content = event.target?.result as string;
-        const newObj: DataObject = {
-          id: Math.random().toString(36).substr(2, 9),
-          name: file.name,
-          rawContent: content,
-          type: file.name.endsWith('.log') ? DataSourceType.LOGS : DataSourceType.TEXT,
-          timestamp: new Date().toISOString(),
-          status: 'pending'
-        };
-        setDataObjects(prev => [newObj, ...prev]);
-      };
-      // reader.readAsText expects a Blob, ensuring file is typed correctly as File (which is a Blob)
-      reader.readAsText(file);
-    });
-  };
-
-  const runTransformation = async (objId: string) => {
-    const obj = dataObjects.find(d => d.id === objId);
-    if (!obj || obj.status === 'completed') return;
-
-    setIsProcessing(true);
-    setDataObjects(prev => prev.map(d => d.id === objId ? { ...d, status: 'processing' } : d));
-
-    try {
-      const result = await geminiService.transformData(obj.rawContent, activeSchema);
-      
-      setDataObjects(prev => prev.map(d => d.id === objId ? { 
-        ...d, 
-        status: 'completed', 
-        structuredData: result.structuredData,
-        confidence: result.confidence,
-        explanation: result.explanation
-      } : d));
-
-      // Simulate Vector DB ingestion
-      const newVectorEntry: VectorEntry = {
-        id: Math.random().toString(36).substr(2, 9),
-        chunk: obj.rawContent.slice(0, 500),
-        embedding: Array.from({ length: 8 }, () => Math.random()),
-        metadata: { source: obj.name, schema: activeSchema.id }
-      };
-      setVectorDb(prev => [newVectorEntry, ...prev]);
-      
-      setSelectedId(objId);
-    } catch (error) {
-      console.error(error);
-      setDataObjects(prev => prev.map(d => d.id === objId ? { ...d, status: 'failed' } : d));
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const selectedObject = dataObjects.find(d => d.id === selectedId);
+    return {
+      totalOrders: orders.length,
+      delivered,
+      inTransit,
+      delayed,
+    };
+  }, []);
 
   return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden">
-      {/* Sidebar Navigation */}
-      <aside className="w-72 bg-white border-r border-slate-200 flex flex-col">
-        <div className="p-6 border-b border-slate-100 flex items-center gap-3">
-          <div className="bg-indigo-600 p-2 rounded-lg">
-            <Layers className="text-white w-5 h-5" />
-          </div>
-          <h1 className="font-bold text-slate-800 tracking-tight">AetherData</h1>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto p-4 space-y-6">
-          <div>
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-2">Data Pipelines</h3>
-            <ul className="space-y-1">
-              {SCHEMAS.map(s => (
-                <li key={s.id}>
-                  <button
-                    onClick={() => setActiveSchema(s)}
-                    className={`w-full text-left px-3 py-2 rounded-md transition-colors flex items-center justify-between ${
-                      activeSchema.id === s.id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-sm font-medium">{s.name}</span>
-                    {activeSchema.id === s.id && <ChevronRight className="w-4 h-4" />}
-                  </button>
-                </li>
-              ))}
-            </ul>
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-100">
+      <div className="mx-auto flex max-w-7xl gap-6 px-4 py-6 lg:px-8">
+        <aside className="w-64 shrink-0 rounded-2xl border border-slate-700 bg-slate-900/80 p-4 shadow-xl">
+          <div className="mb-8 flex items-center gap-3 px-2">
+            <div className="rounded-xl bg-indigo-500 p-2 text-white">
+              <Truck className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-white">Delivery Hub</h1>
+              <p className="text-xs text-slate-400">Operations Control</p>
+            </div>
           </div>
 
-          <div>
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
-              <Database className="w-3 h-3" /> Vector Index (Simulated)
-            </h3>
-            <div className="space-y-2">
-              {vectorDb.length === 0 && (
-                <div className="text-[10px] text-slate-400 italic px-2">No records indexed yet.</div>
-              )}
-              {vectorDb.slice(0, 5).map(v => (
-                <div key={v.id} className="p-2 bg-slate-50 border border-slate-100 rounded text-[10px] font-mono truncate text-slate-500">
-                  {v.id} | {v.metadata.source}
+          <nav className="space-y-2">
+            <SidebarButton icon={<LayoutDashboard className="h-4 w-4" />} label="Overall Dashboard" active={activePage === 'dashboard'} onClick={() => setActivePage('dashboard')} />
+            <SidebarButton icon={<Users className="h-4 w-4" />} label="Clients" active={activePage === 'clients'} onClick={() => setActivePage('clients')} />
+            <SidebarButton icon={<Package className="h-4 w-4" />} label="Service Providers" active={activePage === 'providers'} onClick={() => setActivePage('providers')} />
+            <SidebarButton icon={<UserRound className="h-4 w-4" />} label="Riders" active={activePage === 'riders'} onClick={() => setActivePage('riders')} />
+          </nav>
+
+          <div className="mt-6 rounded-xl border border-slate-700 bg-slate-800 p-3 text-xs text-slate-300">
+            <p className="font-semibold text-white">Live Network</p>
+            <p className="mt-1">12 hubs online · 96% on-time</p>
+          </div>
+        </aside>
+
+        <main className="min-w-0 flex-1 space-y-6">
+          <section className="rounded-2xl border border-indigo-400/30 bg-gradient-to-r from-indigo-600 to-blue-600 p-6 shadow-lg">
+            <h2 className="text-2xl font-bold text-white">Delivery Webapp</h2>
+            <p className="mt-1 text-sm text-indigo-100">
+              Real-time operations view for clients, service providers, and riders.
+            </p>
+          </section>
+
+          {activePage === 'dashboard' && (
+            <section className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard icon={<Package className="h-5 w-5 text-indigo-200" />} label="Total Orders" value={stats.totalOrders} />
+                <StatCard icon={<CircleCheck className="h-5 w-5 text-emerald-200" />} label="Delivered" value={stats.delivered} />
+                <StatCard icon={<Clock3 className="h-5 w-5 text-blue-200" />} label="In Transit" value={stats.inTransit} />
+                <StatCard icon={<AlertTriangle className="h-5 w-5 text-rose-200" />} label="Delayed" value={stats.delayed} />
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-3">
+                <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-sm xl:col-span-2">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-semibold text-white">Recent Delivery Orders</h3>
+                    <span className="text-xs text-slate-400">Updated just now</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-slate-200">
+                      <thead className="text-left text-xs uppercase text-slate-400">
+                        <tr>
+                          <th className="px-4 py-3">Order ID</th><th className="px-4 py-3">Client</th><th className="px-4 py-3">Provider</th><th className="px-4 py-3">Rider</th><th className="px-4 py-3">Destination</th><th className="px-4 py-3">ETA</th><th className="px-4 py-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {orders.map((order) => (
+                          <tr key={order.id} className="border-t border-slate-800 text-slate-200">
+                            <td className="px-4 py-3 font-medium">{order.id}</td><td className="px-4 py-3">{order.client}</td><td className="px-4 py-3">{order.provider}</td><td className="px-4 py-3">{order.rider}</td><td className="px-4 py-3">{order.destination}</td><td className="px-4 py-3">{order.eta}</td>
+                            <td className="px-4 py-3"><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusClasses[order.status]}`}>{order.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </nav>
 
-        <div className="p-4 border-t border-slate-100">
-          <div className="flex items-center justify-between text-xs text-slate-500">
-            <span>API Status</span>
-            <span className="flex items-center gap-1 text-green-500">
-              <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span> Online
-            </span>
-          </div>
-        </div>
-      </aside>
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
+                    <h4 className="mb-3 font-semibold text-white">Route Health</h4>
+                    <p className="flex items-center gap-2 text-slate-300"><Route className="h-4 w-4 text-blue-300" /> 18 active routes</p>
+                    <p className="mt-2 flex items-center gap-2 text-slate-300"><TrendingUp className="h-4 w-4 text-emerald-300" /> +12% delivery speed</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5">
+                    <h4 className="mb-3 font-semibold text-white">Live Activity</h4>
+                    <p className="flex items-center gap-2 text-slate-300"><Activity className="h-4 w-4 text-indigo-300" /> 6 riders picked new orders</p>
+                    <p className="mt-2 text-xs text-slate-400">Last sync: 30 seconds ago</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-slate-800">Workspace</h2>
-            <div className="h-4 w-px bg-slate-200"></div>
-            <div className="flex items-center gap-2 text-sm text-slate-500">
-              <span className="font-mono text-xs px-2 py-0.5 bg-slate-100 rounded">GET</span>
-              <span>v1/translate/{activeSchema.id}</span>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-all shadow-sm"
-            >
-              <FileUp className="w-4 h-4" />
-              Ingest Data
-            </button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              multiple 
-              onChange={handleFileUpload} 
+          {activePage === 'clients' && (
+            <DataTable
+              title="Clients"
+              columns={['Client ID', 'Name', 'Location', 'Total Orders', 'Active Orders']}
+              rows={clients.map((client) => [client.id, client.name, client.location, client.totalOrders.toString(), client.activeOrders.toString()])}
             />
-          </div>
-        </header>
+          )}
 
-        <div className="flex-1 overflow-hidden flex">
-          {/* Left Column: List of Ingested Objects */}
-          <div className="w-1/3 border-r border-slate-200 flex flex-col">
-            <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-400 uppercase">Incoming Streams</span>
-              <span className="bg-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded font-bold">
-                {dataObjects.length}
-              </span>
+          {activePage === 'providers' && (
+            <DataTable
+              title="Service Providers"
+              columns={['Provider ID', 'Company', 'Service Type', 'Rating', 'Completed Jobs']}
+              rows={providers.map((provider) => [provider.id, provider.company, provider.serviceType, provider.rating.toFixed(1), provider.completedJobs.toString()])}
+            />
+          )}
+
+          {activePage === 'riders' && (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {riders.map((rider) => (
+                <article key={rider.id} className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between">
+                    <div>
+                      <h3 className="font-semibold text-white">{rider.name}</h3>
+                      <p className="text-xs text-slate-400">{rider.id}</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${rider.status === 'Available' ? 'bg-emerald-100 text-emerald-700' : rider.status === 'On Delivery' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700'}`}>
+                      {rider.status}
+                    </span>
+                  </div>
+                  <div className="space-y-2 text-sm text-slate-300">
+                    <p className="flex items-center gap-2"><MapPinned className="h-4 w-4" /> {rider.zone}</p>
+                    <p className="flex items-center gap-2"><Phone className="h-4 w-4" /> {rider.phone}</p>
+                    <p className="text-xs font-semibold uppercase text-slate-500">Deliveries today: {rider.deliveriesToday}</p>
+                  </div>
+                </article>
+              ))}
             </div>
-            <div className="flex-1 overflow-y-auto">
-              {dataObjects.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center p-8 text-center">
-                  <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                    <History className="text-slate-300 w-6 h-6" />
-                  </div>
-                  <p className="text-sm text-slate-400">No data ingested. Drag and drop files or use the ingest button.</p>
-                </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {dataObjects.map(obj => (
-                    <div 
-                      key={obj.id} 
-                      onClick={() => setSelectedId(obj.id)}
-                      className={`p-4 cursor-pointer transition-all hover:bg-slate-50 ${selectedId === obj.id ? 'bg-indigo-50/50 border-l-2 border-indigo-500' : ''}`}
-                    >
-                      <div className="flex justify-between items-start mb-1">
-                        <h4 className="text-sm font-semibold text-slate-700 truncate max-w-[160px]">{obj.name}</h4>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                          obj.status === 'completed' ? 'bg-green-100 text-green-700' :
-                          obj.status === 'processing' ? 'bg-amber-100 text-amber-700' :
-                          obj.status === 'failed' ? 'bg-red-100 text-red-700' :
-                          'bg-slate-100 text-slate-600'
-                        }`}>
-                          {obj.status.toUpperCase()}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                        <span className="capitalize">{obj.type}</span>
-                        <span>•</span>
-                        <span>{new Date(obj.timestamp).toLocaleTimeString()}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Right Column: Comparison / Details */}
-          <div className="flex-1 bg-white overflow-y-auto p-8">
-            {!selectedObject ? (
-              <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
-                <Code2 className="w-16 h-16 text-slate-300 mb-6" />
-                <h3 className="text-xl font-medium text-slate-800">Translation Engine Ready</h3>
-                <p className="text-slate-500 max-w-sm mt-2">Select a data stream from the left panel to begin structural analysis and translation.</p>
-              </div>
-            ) : (
-              <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold text-slate-800">{selectedObject.name}</h2>
-                    <p className="text-slate-500 text-sm mt-1">Applying schema: <span className="text-indigo-600 font-semibold">{activeSchema.name}</span></p>
-                  </div>
-                  {selectedObject.status === 'pending' && (
-                    <button 
-                      onClick={() => runTransformation(selectedObject.id)}
-                      disabled={isProcessing}
-                      className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-indigo-100"
-                    >
-                      {isProcessing ? <Activity className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
-                      Start Translation
-                    </button>
-                  )}
-                </div>
-
-                {selectedObject.status === 'completed' && (
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                      <div className="text-[10px] text-slate-400 font-bold uppercase mb-1">Confidence Score</div>
-                      <div className="flex items-end gap-2">
-                        <span className={`text-2xl font-bold ${selectedObject.confidence! > 0.8 ? 'text-green-600' : 'text-amber-600'}`}>
-                          {(selectedObject.confidence! * 100).toFixed(0)}%
-                        </span>
-                        <CheckCircle2 className="w-5 h-5 text-green-500 mb-1" />
-                      </div>
-                    </div>
-                    <div className="col-span-2 bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                      <div className="text-[10px] text-indigo-400 font-bold uppercase mb-1">AI Reasoning</div>
-                      <p className="text-sm text-indigo-800 italic leading-relaxed">
-                        "{selectedObject.explanation}"
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-8 h-[500px]">
-                  {/* Unstructured View */}
-                  <div className="flex flex-col border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 uppercase tracking-tighter">Raw Unstructured</span>
-                      <Trash2 className="w-4 h-4 text-slate-300 cursor-pointer hover:text-red-400 transition-colors" />
-                    </div>
-                    <div className="flex-1 p-6 bg-slate-900 overflow-y-auto">
-                      <pre className="text-xs text-slate-300 font-mono whitespace-pre-wrap leading-relaxed">
-                        {selectedObject.rawContent}
-                      </pre>
-                    </div>
-                  </div>
-
-                  {/* Structured View */}
-                  <div className="flex flex-col border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-500 uppercase tracking-tighter">Model-Ready Structured</span>
-                      <Maximize2 className="w-4 h-4 text-slate-300 cursor-pointer" />
-                    </div>
-                    <div className="flex-1 p-6 bg-slate-50 overflow-y-auto">
-                      {selectedObject.status === 'completed' ? (
-                        <pre className="text-xs text-indigo-900 font-mono leading-relaxed">
-                          {JSON.stringify(selectedObject.structuredData, null, 2)}
-                        </pre>
-                      ) : selectedObject.status === 'processing' ? (
-                        <div className="h-full flex flex-col items-center justify-center gap-4">
-                          <div className="relative w-12 h-12">
-                            <div className="absolute inset-0 border-4 border-indigo-100 rounded-full"></div>
-                            <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
-                          </div>
-                          <p className="text-xs text-slate-400 animate-pulse font-medium">Analyzing patterns...</p>
-                        </div>
-                      ) : (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-300 italic text-sm">
-                          Structured preview will appear after translation.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </main>
+          )}
+        </main>
+      </div>
     </div>
   );
 };
+
+interface SidebarButtonProps {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}
+
+const SidebarButton: React.FC<SidebarButtonProps> = ({ icon, label, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+      active ? 'bg-indigo-500/20 text-indigo-200' : 'text-slate-300 hover:bg-slate-800'
+    }`}
+  >
+    {icon}
+    {label}
+  </button>
+);
+
+interface StatCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+}
+
+const StatCard: React.FC<StatCardProps> = ({ icon, label, value }) => (
+  <article className="rounded-2xl border border-slate-700 bg-slate-900/70 p-5 shadow-sm">
+    <div className="mb-3 w-fit rounded-lg bg-slate-800 p-2">{icon}</div>
+    <h3 className="text-sm text-slate-400">{label}</h3>
+    <p className="mt-1 text-2xl font-bold text-white">{value}</p>
+  </article>
+);
+
+interface DataTableProps {
+  title: string;
+  columns: string[];
+  rows: string[][];
+}
+
+const DataTable: React.FC<DataTableProps> = ({ title, columns, rows }) => (
+  <section className="rounded-2xl border border-slate-700 bg-slate-900/70 shadow-sm">
+    <div className="border-b border-slate-700 p-4">
+      <h3 className="font-semibold text-white">{title}</h3>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm text-slate-200">
+        <thead className="text-left text-xs uppercase text-slate-400">
+          <tr>
+            {columns.map((column) => (
+              <th key={column} className="px-4 py-3">{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={`${title}-row-${rowIndex}`} className="border-t border-slate-800">
+              {row.map((value, cellIndex) => (
+                <td key={`${title}-${rowIndex}-${cellIndex}`} className="px-4 py-3">{value}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+);
 
 export default App;
